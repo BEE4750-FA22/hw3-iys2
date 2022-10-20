@@ -1,6 +1,6 @@
 ---
 title: "BEE 4750/5750 Homework 3"
-author: "Your name here (your netID here)"
+author: "Ian Shen-Costello (iys2)"
 date: `j import Dates; Dates.Date(Dates.now())`
 weave_options:
     term: true
@@ -19,6 +19,7 @@ Pkg.instantiate()
 <!--- this block is hidden, but stores the generator and demand data; you can use a dataframe to combine these or refactor as you'd like -->
 ```julia; echo = false; results = "hidden"
 # generator data
+generators = ["Geothermal", "Coal", "CCGT", "CT", "Wind", "Solar"]
 investment_cost = [457000, 268000, 85000, 62580, 92000, 92000]
 op_cost = [0, 22, 35, 45, 0, 0]
 co2_emissions = [0, 1, 0.43, 0.55, 0, 0]
@@ -26,34 +27,209 @@ thermal_cf = [0.95, 1, 1, 1]
 
 hours = 1:24
 demand = [1517, 1486, 1544, 1733, 2058, 2470, 2628, 2696, 2653, 2591, 2626, 2714, 2803, 2842, 2891,  2821, 3017, 3074, 2957,  2487, 2249, 1933, 1684, 1563]
+geothermal_cf = [0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95]
+coal_cf = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+ccgt_cf = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+ct_cf = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 wind_cf = [0.58, 0.57, 0.55, 0.28, 0.14, 0.21, 0.03, 0.04, 0.01, 0.04, 0.04, 0.01, 0.04, 0.04, 0.01, 0.01, 0.01, 0.13, 0.30, 0.45, 0.44, 0.57, 0.55, 0.58]
 solar_cf = [0, 0, 0, 0, 0, 0, 0.20, 0.57, 0.80, 0.93, 0.99, 0.99, 0.85, 0.99, 0.95, 0.81, 0.55, 0.12, 0, 0, 0, 0, 0, 0]
+
+cf = vcat(geothermal_cf',coal_cf',ccgt_cf',ct_cf',wind_cf',solar_cf')
 ```
 
 # Problem 1
 
 ## Problem 1.1
+$x_G$ is the installed capacity (MW) of generator type G, where G includes geothermal, coal, CCGT, CT, Wind, and Solar.
 
+$y_{G,t}$ is the production (MW) from generator type G, in a period t, over 24 hours. 
+Production over the year is this value multiplied by 365.
 ## Problem 1.2
+The objective function is as follows,
+
+```math
+\text{min Z} = \sum_{G}^6 C_G^{INV} x_G + 365 \sum_{G}^6 \sum_{t=1}^{24} C_G^{OP} y_{G,t} \text{,}
+```
+
+where $C_G^{INV}$ is the investment cost and $C_G^{OP}$ is the operating cost for generator G.
 
 ## Problem 1.3
+The constraints are as follows,
+
+- Generators cannot produce more than installed capacity and availability.
+
+```math
+y_G,t \le x_G {CF}_{G,t}
+```
+
+- Operating production for every hour throughout the day must meet demand.
+
+```math
+\sum_{G}^6 y_{G,t} \ge D_t
+```
+
+where $D_t$ is demand at each hour
+
+- Non-negativity
+
+```math
+x_G \ge 0
+```
+```math
+y_{G,t} \ge 0
+```
 
 ## Problem 1.4
 
+```julia; term = false;
+using JuMP
+using HiGHS
+
+Z = Model(HiGHS.Optimizer)
+G = 1:length(generators)
+T = hours
+
+@variable(Z, x[G] >= 0)
+@variable(Z, y[G, T] >= 0)
+
+@objective(Z, Min, investment_cost'*x + 365*(sum(op_cost.*y)) + 1000*365*(sum(y) - sum(demand)))
+
+@constraint(Z, availablility[g in G, t in T], y[g,t] <= cf[g,t]*x[g])
+
+@constraint(Z, load[t in T], sum(y[:, t]) == demand[t])
+```
+
 ## Problem 1.5
+```julia; 
+optimize!(Z) 
+objective_value(Z)
+
+print(value.(x))
+value.(y)
+
+#Energy non-served
+print(365*sum(value.(y)) - sum(demand))
+```
+
+The utility build of each type of generating plant would be zero for geothermal and coal, 1704.26 MW for CCGT, 881.05 MW for CT, 1238.05 MW for wind, and 2728.91 MW for solar.
+(This is shown above in value.(x))
+
+The total cost will be \$912,142,212.24.
+(This is shown above in objective value.)
+
+The amount of energy non-served will be 2.66 x $10^{-3}$ Watts.
 
 ## Problem 1.6
+
+```julia; 
+using Plots
+h = zeros(6,24)
+
+for i =1:6
+    for j = 1:24
+        h[i,j] = value.(y)[i,j]
+    end
+end
+
+plot(h',title = "Raw Energy Production over 24 hours", xlabel = "Time (hrs)", ylabel = "Energy Production (MW)", label= ["Geothermal" "Coal" "CCGT" "CT" "Wind" "Solar"])
+
+areaplot(h',title = "Raw Energy Production over 24 hours", xlabel = "Time (hrs)", ylabel = "Energy Production (MW)", label= ["Geothermal" "Coal" "CCGT" "CT" "Wind" "Solar"])
+
+```
+The main takeaways are that solar production dominates during the day while the other 3 forms (CCGT, CT, and Wind) can meet demand when there is less sunlight.
 
 # Problem 2
 
 ## Problem 2.1
+The objective and decision variables would remain the same.
 
+A new constraint would need to be added:
+
+```math
+365 \sum_{G}^6 \sum_{t}^{24} CO2_{G} \le 1.5 \text{Mt $CO_2$/yr}
+```
 ## Problem 2.2
+```julia; term = false;
+L = Model(HiGHS.Optimizer)
+G = 1:length(generators)
+T = hours
 
+@variable(L, x[G] >= 0)
+@variable(L, y[G, T] >= 0)
+
+@objective(L, Min, investment_cost'*x + 365*(sum(op_cost.*y)) + 1000*365*(sum(y) - sum(demand)))
+
+@constraint(L, availablility[g in G, t in T], y[g,t] <= cf[g,t]*x[g])
+
+@constraint(L, load[t in T], sum(y[:, t]) == demand[t])
+
+@constraint(L, co2[g in G], 365*sum((co2_emissions[g]*sum(y[g,:]))) <= 1.5*10^6)
+
+
+```
 ## Problem 2.3
+```julia; 
+optimize!(L) 
+L = objective_value(L)
 
+print(value.(x))
+value.(y)
+```
+The utility build of each type of generating plant would be no purchase of geothermal and coal, 813.79 MW for CCGT, 1551.47 MW for CT, 2668.68 MW for wind, and 3015.07 MW for solar.
+(This is shown above in value.(x))
+
+The main difference between this and part 1 is less investment in CCGT, as it produces a lot of carbon emissions, and more investment into wind and solar, which produce no carbon emissions. 
+
+The total cost will be \$933,988,453.28. The slight increase in cost makes sense as renewable energy sources, which are more expensive, are being prioritizes with the emissions limit. 
+(This is shown above in objective value.)
 ## Problem 2.4
 
+```julia; 
+h = zeros(6,24)
+
+for i =1:6
+    for j = 1:24
+        h[i,j] = value.(y)[i,j]
+    end
+end
+
+plot(h',title = "Raw Energy Production over 24 hours", xlabel = "Time (hrs)", ylabel = "Energy Production (MW)", label= ["Geothermal" "Coal" "CCGT" "CT" "Wind" "Solar"])
+
+areaplot(h',title = "Raw Energy Production over 24 hours", xlabel = "Time (hrs)", ylabel = "Energy Production (MW)", label= ["Geothermal" "Coal" "CCGT" "CT" "Wind" "Solar"])
+```
+The difference is a major cap or plateau in CCGT production, during peak hours. Renewables also make up a larger proportion of production overall in order to meet the carbon emissiosn requirement. 
+
+
 ## Problem 2.5
+```julia;
+M = Model(HiGHS.Optimizer)
+G = 1:length(generators)
+T = hours
+
+@variable(M, x[G] >= 0)
+@variable(M, y[G, T] >= 0)
+
+@objective(M, Min, investment_cost'*x + 365*(sum(op_cost.*y)) + 1000*365*(sum(y) - sum(demand)))
+
+@constraint(M, availablility[g in G, t in T], y[g,t] <= cf[g,t]*x[g])
+
+@constraint(M, load[t in T], sum(y[:, t]) == demand[t])
+
+@constraint(M, co2[g in G], 365*sum((co2_emissions[g]*sum(y[g,:]))) <= 1.501*10^6)
+
+optimize!(M) 
+M = objective_value(M)
+
+print(value.(x))
+value.(y)
+
+print(M-L)
+
+```
+The model was run again this time with the slight increase to the carbon emission constraint.
+
+Allowing an extra 1000tCO2/yr decreases the optimal cost to the utility by \$55,148. 
 
 # References
+Alex Wang
+Grace Lin
